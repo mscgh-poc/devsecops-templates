@@ -1,0 +1,103 @@
+name: Deploy to AKS (Reusable)
+
+on:
+  workflow_call:
+    inputs:
+      environment:
+        description: 'Ambiente de despliegue (dev/prod)'
+        type: string
+        required: true
+      acr-name:
+        description: 'Nombre del ACR'
+        type: string
+        required: true
+      image-name:
+        description: 'Nombre de la imagen'
+        type: string
+        required: true
+      resource-group:
+        description: 'Resource Group de Azure'
+        type: string
+        required: true
+      aks-name:
+        description: 'Nombre del cluster AKS'
+        type: string
+        required: true
+      k8s-namespace:
+        description: 'Namespace de Kubernetes'
+        type: string
+        required: true
+      k8s-manifests-path:
+        description: 'Ruta a los manifiestos K8s'
+        type: string
+        required: false
+        default: 'k8s'
+      rollout-timeout:
+        description: 'Timeout para el rollout del deployment'
+        type: string
+        required: false
+        default: '120s'
+    secrets:
+      AZURE_CLIENT_ID:
+        required: true
+      AZURE_TENANT_ID:
+        required: true
+      AZURE_SUBSCRIPTION_ID:
+        required: true
+
+jobs:
+  deploy:
+    name: Deploy to ${{ inputs.environment }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    environment: ${{ inputs.environment }}
+    permissions:
+      contents: read
+      id-token: write
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Azure Login (OIDC)
+        uses: azure/login@v2
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+
+      - name: Get AKS credentials
+        run: |
+          az aks get-credentials \
+            --resource-group ${{ inputs.resource-group }} \
+            --name ${{ inputs.aks-name }} \
+            --overwrite-existing
+
+          # Configurar kubelogin si el cluster usa Entra ID
+          if az aks show --resource-group ${{ inputs.resource-group }} --name ${{ inputs.aks-name }} --query "aadProfile" -o tsv 2>/dev/null | grep -q .; then
+            echo "::notice::Cluster con Entra ID detectado, configurando kubelogin..."
+            sudo az aks install-cli
+            kubelogin convert-kubeconfig -l azurecli
+          fi
+
+      - name: Set image and apply manifests
+        run: |
+          cd ${{ inputs.k8s-manifests-path }}
+          IMAGE_TAG="${{ inputs.acr-name }}.azurecr.io/${{ inputs.image-name }}:${{ github.sha }}"
+          kustomize edit set image ${{ inputs.image-name }}="${IMAGE_TAG}"
+          kubectl apply -k .
+
+      - name: Wait for rollout
+        run: |
+          kubectl rollout status deployment/${{ inputs.image-name }} \
+            -n ${{ inputs.k8s-namespace }} \
+            --timeout=${{ inputs.rollout-timeout }}
+
+      - name: Generate deploy summary
+        uses: mscgh-poc/github-actions/actions/deploy-summary@main
+        with:
+          image-tag: "${{ inputs.acr-name }}.azurecr.io/${{ inputs.image-name }}:${{ github.sha }}"
+          commit-sha: ${{ github.sha }}
+          run-number: ${{ github.run_number }}
+          namespace: ${{ inputs.k8s-namespace }}
+          environment: ${{ inputs.environment }}

@@ -1,0 +1,49 @@
+name: CI Pipeline (Reusable)
+
+on:
+  workflow_call:
+    inputs:
+      node-version:
+        description: 'Versión de Node.js'
+        type: string
+        required: false
+        default: '22'
+      run-tests:
+        description: 'Ejecutar tests unitarios'
+        type: boolean
+        required: false
+        default: true
+
+jobs:
+  # ─────────────────────────────────────────────
+  # Lint y Tests
+  # ─────────────────────────────────────────────
+  test:
+    name: Tests
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js project
+        uses: mscgh-poc/github-actions/actions/setup-node-project@main
+        with:
+          node-version: ${{ inputs.node-version }}
+
+      - name: Run tests
+        if: inputs.run-tests
+        run: npm test
+
+  # ─────────────────────────────────────────────
+  # Análisis de seguridad GHAS
+  # ─────────────────────────────────────────────
+  security:
+    name: Security Analysis (GHAS)
+    uses: mscgh-poc/devsecops-templates/.github/workflows/security-analysis.yml@main
+    permissions:
+      contents: read
+      security-events: write
+      actions: read

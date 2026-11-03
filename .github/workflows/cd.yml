@@ -1,0 +1,103 @@
+name: CD Pipeline (Reusable)
+
+on:
+  workflow_call:
+    inputs:
+      node-version:
+        description: 'Version de Node.js'
+        type: string
+        required: false
+        default: '22'
+      environment:
+        description: 'Ambiente de despliegue (dev/prod)'
+        type: string
+        required: true
+      acr-name:
+        description: 'Nombre del Azure Container Registry'
+        type: string
+        required: true
+      image-name:
+        description: 'Nombre de la imagen (sin registry)'
+        type: string
+        required: true
+      resource-group:
+        description: 'Resource Group de Azure'
+        type: string
+        required: true
+      aks-name:
+        description: 'Nombre del cluster AKS'
+        type: string
+        required: true
+      k8s-namespace:
+        description: 'Namespace de Kubernetes'
+        type: string
+        required: true
+      k8s-manifests-path:
+        description: 'Ruta a los manifiestos K8s'
+        type: string
+        required: false
+        default: 'k8s'
+      rollout-timeout:
+        description: 'Timeout para el rollout'
+        type: string
+        required: false
+        default: '120s'
+    secrets:
+      AZURE_CLIENT_ID:
+        required: true
+      AZURE_TENANT_ID:
+        required: true
+      AZURE_SUBSCRIPTION_ID:
+        required: true
+
+jobs:
+  # ─────────────────────────────────────────────
+  # 1. Tests + Analisis GHAS
+  # ─────────────────────────────────────────────
+  ci:
+    name: CI
+    uses: mscgh-poc/devsecops-templates/.github/workflows/ci.yml@main
+    with:
+      node-version: ${{ inputs.node-version }}
+    permissions:
+      contents: read
+      security-events: write
+      actions: read
+
+  # ─────────────────────────────────────────────
+  # 2. Build & Push imagen a ACR
+  # ─────────────────────────────────────────────
+  build:
+    name: Build Image
+    needs: ci
+    uses: mscgh-poc/devsecops-templates/.github/workflows/build-push.yml@main
+    with:
+      acr-name: ${{ inputs.acr-name }}
+      image-name: ${{ inputs.image-name }}
+      node-version: ${{ inputs.node-version }}
+    secrets:
+      AZURE_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
+      AZURE_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
+      AZURE_SUBSCRIPTION_ID: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+
+  # ─────────────────────────────────────────────
+  # 3. Deploy a AKS
+  # ─────────────────────────────────────────────
+  deploy:
+    name: Deploy
+    needs: build
+    uses: mscgh-poc/devsecops-templates/.github/workflows/deploy-aks.yml@main
+    with:
+      environment: ${{ inputs.environment }}
+      acr-name: ${{ inputs.acr-name }}
+      image-name: ${{ inputs.image-name }}
+      resource-group: ${{ inputs.resource-group }}
+      aks-name: ${{ inputs.aks-name }}
+      k8s-namespace: ${{ inputs.k8s-namespace }}
+      k8s-manifests-path: ${{ inputs.k8s-manifests-path }}
+      rollout-timeout: ${{ inputs.rollout-timeout }}
+    secrets:
+      AZURE_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
+      AZURE_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
+      AZURE_SUBSCRIPTION_ID: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+

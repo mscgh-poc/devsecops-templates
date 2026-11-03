@@ -1,0 +1,87 @@
+name: Build & Push Image (Reusable)
+
+on:
+  workflow_call:
+    inputs:
+      acr-name:
+        description: 'Nombre del Azure Container Registry'
+        type: string
+        required: true
+      image-name:
+        description: 'Nombre de la imagen (sin registry)'
+        type: string
+        required: true
+      node-version:
+        description: 'Versión de Node.js para build'
+        type: string
+        required: false
+        default: '22'
+    secrets:
+      AZURE_CLIENT_ID:
+        required: true
+      AZURE_TENANT_ID:
+        required: true
+      AZURE_SUBSCRIPTION_ID:
+        required: true
+    outputs:
+      image-tag:
+        description: 'Tag completo de la imagen publicada'
+        value: ${{ jobs.build.outputs.image-tag }}
+      image-digest:
+        description: 'Digest SHA de la imagen'
+        value: ${{ jobs.build.outputs.image-digest }}
+
+jobs:
+  build:
+    name: Build & Push
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+      id-token: write
+
+    outputs:
+      image-tag: ${{ steps.meta.outputs.image-tag }}
+      image-digest: ${{ steps.push.outputs.digest }}
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Generate image metadata
+        id: meta
+        run: |
+          IMAGE_TAG="${{ inputs.acr-name }}.azurecr.io/${{ inputs.image-name }}:${{ github.sha }}"
+          echo "image-tag=${IMAGE_TAG}" >> "$GITHUB_OUTPUT"
+          echo "date=$(date -u +'%Y-%m-%dT%H:%M:%SZ')" >> "$GITHUB_OUTPUT"
+
+      - name: Azure Login (OIDC)
+        uses: azure/login@v2
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+
+      - name: Login to ACR
+        run: az acr login --name ${{ inputs.acr-name }}
+
+      - name: Setup Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build and push image
+        id: push
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          push: true
+          tags: |
+            ${{ steps.meta.outputs.image-tag }}
+            ${{ inputs.acr-name }}.azurecr.io/${{ inputs.image-name }}:latest
+          build-args: |
+            APP_VERSION=1.0.0
+            GIT_SHA=${{ github.sha }}
+            BUILD_NUMBER=${{ github.run_number }}
+            BUILD_DATE=${{ steps.meta.outputs.date }}
+            GITHUB_REPOSITORY=${{ github.repository }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
