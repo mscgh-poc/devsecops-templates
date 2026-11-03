@@ -64,6 +64,7 @@ jobs:
       contents: read
       security-events: write
       actions: read
+      pull-requests: write
 
   # ─────────────────────────────────────────────
   # 2. Build & Push imagen a ACR
