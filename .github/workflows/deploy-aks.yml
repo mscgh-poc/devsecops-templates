@@ -6,7 +6,8 @@ on:
       environment:
         description: 'Ambiente de despliegue (dev/prod)'
         type: string
-        required: true
+        required: false
+        default: ''
       acr-name:
         description: 'Nombre del ACR'
         type: string
@@ -50,7 +51,6 @@ jobs:
     name: Deploy to ${{ inputs.environment }}
     runs-on: ubuntu-latest
     timeout-minutes: 10
-    environment: ${{ inputs.environment }}
     permissions:
       contents: read
       id-token: write

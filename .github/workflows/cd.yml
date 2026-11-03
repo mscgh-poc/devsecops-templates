@@ -11,7 +11,8 @@ on:
       environment:
         description: 'Ambiente de despliegue (dev/prod)'
         type: string
-        required: true
+        required: false
+        default: ''
       acr-name:
         description: 'Nombre del Azure Container Registry'
         type: string
